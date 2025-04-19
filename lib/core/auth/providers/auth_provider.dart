@@ -1,65 +1,76 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:dartz/dartz.dart';
-import 'package:http/http.dart' as http;
-
-import '../models/user_model.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+// Add this import
 import '../services/auth_service.dart';
+// Add this import
 
-// Provider for auth service
+// Provider for the authentication service
 final authServiceProvider = Provider<AuthService>((ref) {
   return AuthService();
 });
 
-// Provider for current authenticated user state
-final authStateProvider = AsyncNotifierProvider<AuthNotifier, UserModel?>(() {
-  return AuthNotifier();
+// Provider to get SharedPreferences instance
+final sharedPreferencesProvider = Provider<SharedPreferences>((ref) {
+  throw UnimplementedError('Initialize this in main.dart');
 });
 
-class AuthNotifier extends AsyncNotifier<UserModel?> {
-  @override
-  Future<UserModel?> build() async {
-    return _getCurrentUser();
+// Key to store auth state in SharedPreferences
+const String _authKey = 'is_authenticated';
+
+// Provider for persistent authentication state
+final authStateProvider =
+    StateNotifierProvider<AuthStateNotifier, AsyncValue<bool>>((ref) {
+  final authService = ref.watch(authServiceProvider);
+  final prefs = ref.watch(sharedPreferencesProvider);
+  return AuthStateNotifier(authService, prefs);
+});
+
+class AuthStateNotifier extends StateNotifier<AsyncValue<bool>> {
+  final AuthService _authService;
+  final SharedPreferences _prefs;
+
+  AuthStateNotifier(this._authService, this._prefs)
+      : super(const AsyncValue.loading()) {
+    _initAuth();
   }
 
-  Future<UserModel?> _getCurrentUser() async {
-    final authService = ref.read(authServiceProvider);
-    return authService.getCurrentUser();
+  // Load authentication state when app starts
+  Future<void> _initAuth() async {
+    final isLoggedIn = _prefs.getBool(_authKey) ?? false;
+    state = AsyncValue.data(isLoggedIn);
   }
 
-  // Sign in method
-  Future<Either<String, UserModel>> signIn() async {
-    final authService = ref.read(authServiceProvider);
-
-    // Set state to loading
+  // Sign in method that persists authentication
+  Future<bool> signIn() async {
     state = const AsyncValue.loading();
-
-    final result = await authService.signIn();
-
-    // Update state based on result
-    result.fold(
-      (error) => state = AsyncValue.error(error, StackTrace.current),
-      (user) => state = AsyncValue.data(user),
-    );
-
-    return result;
+    try {
+      final result = await _authService.signIn();
+      return result.fold(
+        (error) {
+          state = const AsyncValue.data(false);
+          return false;
+        },
+        (user) async {
+          await _prefs.setBool(_authKey, true);
+          state = const AsyncValue.data(true);
+          return true;
+        },
+      );
+    } catch (e) {
+      state = AsyncValue.error(e, StackTrace.current);
+      return false;
+    }
   }
 
-  // Sign out method
+  // Sign out method that clears persistent authentication
   Future<void> signOut() async {
-    final authService = ref.read(authServiceProvider);
-    await authService.signOut();
-    state = const AsyncValue.data(null);
-  }
-
-  // Get authenticated client
-  Future<http.Client?> getAuthenticatedClient() {
-    final authService = ref.read(authServiceProvider);
-    return authService.getAuthenticatedClient();
+    state = const AsyncValue.loading();
+    try {
+      await _authService.signOut();
+      await _prefs.setBool(_authKey, false);
+      state = const AsyncValue.data(false);
+    } catch (e) {
+      state = AsyncValue.error(e, StackTrace.current);
+    }
   }
 }
-
-// Provider for authenticated HTTP client
-final authenticatedClientProvider = FutureProvider<http.Client?>((ref) async {
-  final authNotifier = ref.watch(authStateProvider.notifier);
-  return authNotifier.getAuthenticatedClient();
-});

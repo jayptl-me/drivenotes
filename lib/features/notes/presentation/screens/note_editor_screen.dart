@@ -2,8 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
-import '../../../../core/drive/providers/drive_provider.dart';
-import '../../../../core/drive/models/note_model.dart';
+import '../../../../core/notes/providers/note_provider.dart';
+import '../../../../core/notes/models/note_model.dart';
 
 class NoteEditorScreen extends ConsumerStatefulWidget {
   final String? noteId;
@@ -17,12 +17,10 @@ class NoteEditorScreen extends ConsumerStatefulWidget {
 class _NoteEditorScreenState extends ConsumerState<NoteEditorScreen> {
   final _titleController = TextEditingController();
   final _contentController = TextEditingController();
-  final _tagController = TextEditingController();
   bool _isLoading = false;
   bool _isSaving = false;
   String? _errorMessage;
   bool _isEditMode = false;
-  List<String> _tags = [];
   NoteModel? _originalNote;
 
   @override
@@ -38,7 +36,6 @@ class _NoteEditorScreenState extends ConsumerState<NoteEditorScreen> {
   void dispose() {
     _titleController.dispose();
     _contentController.dispose();
-    _tagController.dispose();
     super.dispose();
   }
 
@@ -49,16 +46,13 @@ class _NoteEditorScreenState extends ConsumerState<NoteEditorScreen> {
     });
 
     try {
-      final note = await ref
-          .read(notesProvider.notifier)
-          .getNoteById(widget.noteId!);
+      final noteResult = await ref.read(noteProvider(widget.noteId!).future);
 
-      if (note != null) {
-        _titleController.text = note.title;
-        _contentController.text = note.content ?? '';
+      if (noteResult != null) {
+        _titleController.text = noteResult.title;
+        _contentController.text = noteResult.content;
         setState(() {
-          _tags = List.from(note.tags);
-          _originalNote = note;
+          _originalNote = noteResult;
         });
       } else {
         _errorMessage = 'Note not found';
@@ -72,45 +66,28 @@ class _NoteEditorScreenState extends ConsumerState<NoteEditorScreen> {
     }
   }
 
-  void _addTag() {
-    final tag = _tagController.text.trim();
-    if (tag.isNotEmpty && !_tags.contains(tag)) {
-      setState(() {
-        _tags.add(tag);
-        _tagController.clear();
-      });
-    }
-  }
-
-  void _removeTag(String tag) {
-    setState(() {
-      _tags.remove(tag);
-    });
-  }
-
   Future<void> _saveNote() async {
     final title = _titleController.text.trim();
     final content = _contentController.text.trim();
 
     // Check if there are actual changes when in edit mode
     if (_isEditMode && _originalNote != null) {
-      bool hasChanges = title != _originalNote!.title || 
-                        content != _originalNote!.content ||
-                        !_areTagListsEqual(_tags, _originalNote!.tags);
-                        
+      bool hasChanges =
+          title != _originalNote!.title || content != _originalNote!.content;
+
       if (!hasChanges) {
-        if (context.mounted) {
+        if (mounted) {
           context.pop();
         }
         return;
       }
     }
-    
+
     // Validate inputs
     if (title.isEmpty) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('Please enter a title')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please enter a title')),
+      );
       return;
     }
 
@@ -120,45 +97,32 @@ class _NoteEditorScreenState extends ConsumerState<NoteEditorScreen> {
     });
 
     try {
-      final result =
-          _isEditMode
-              ? await ref
-                  .read(notesProvider.notifier)
-                  .updateNote(widget.noteId!, title, content, tags: _tags)
-              : await ref
-                  .read(notesProvider.notifier)
-                  .createNote(title, content, tags: _tags);
+      if (_isEditMode && _originalNote != null) {
+        final updatedNote = NoteModel(
+          id: _originalNote!.id,
+          title: title,
+          content: content,
+          createdAt: _originalNote!.createdAt,
+          updatedAt: DateTime.now().toUtc(),
+        );
 
-      result.fold(
-        (error) {
-          setState(() {
-            _errorMessage = error;
-            _isSaving = false;
-          });
-        },
-        (note) {
-          setState(() {
-            _isSaving = false;
-          });
-          if (context.mounted) {
-            context.pop();
-          }
-        },
-      );
+        await ref.read(notesProvider.notifier).updateNote(updatedNote);
+      } else {
+        await ref.read(notesProvider.notifier).createNote(title, content);
+      }
+
+      if (mounted) {
+        context.pop();
+      }
     } catch (e) {
       setState(() {
         _errorMessage = 'Failed to save note: ${e.toString()}';
+      });
+    } finally {
+      setState(() {
         _isSaving = false;
       });
     }
-  }
-
-  bool _areTagListsEqual(List<String> list1, List<String> list2) {
-    if (list1.length != list2.length) return false;
-    for (int i = 0; i < list1.length; i++) {
-      if (list1[i] != list2[i]) return false;
-    }
-    return true;
   }
 
   @override
@@ -167,124 +131,74 @@ class _NoteEditorScreenState extends ConsumerState<NoteEditorScreen> {
       appBar: AppBar(
         title: Text(_isEditMode ? 'Edit Note' : 'New Note'),
         actions: [
-          _isSaving
-              ? const Center(
-                child: Padding(
-                  padding: EdgeInsets.only(right: 16.0),
-                  child: SizedBox(
-                    width: 24,
-                    height: 24,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  ),
-                ),
-              )
-              : IconButton(icon: const Icon(Icons.check), onPressed: _saveNote),
+          IconButton(
+            icon: const Icon(Icons.check),
+            onPressed: _isSaving ? null : _saveNote,
+          ),
         ],
       ),
-      body:
-          _isLoading
-              ? const Center(child: CircularProgressIndicator())
-              : _errorMessage != null
-              ? Center(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    const Icon(
-                      Icons.error_outline,
-                      color: Colors.red,
-                      size: 48,
-                    ),
-                    const SizedBox(height: 16),
-                    Text(_errorMessage!),
-                    const SizedBox(height: 16),
-                    ElevatedButton(
-                      onPressed: _isEditMode ? _loadNote : () => context.pop(),
-                      child: Text(_isEditMode ? 'Try Again' : 'Go Back'),
-                    ),
-                  ],
-                ),
-              )
-              : Padding(
-                padding: const EdgeInsets.all(16.0),
-                child: Column(
-                  children: [
-                    // Title input
-                    TextField(
-                      controller: _titleController,
-                      style: const TextStyle(
-                        fontSize: 20,
-                        fontWeight: FontWeight.bold,
-                      ),
-                      decoration: const InputDecoration(
-                        hintText: 'Title',
-                        border: InputBorder.none,
-                        contentPadding: EdgeInsets.symmetric(vertical: 8),
-                      ),
-                      autofocus: !_isEditMode,
-                    ),
-                    const Divider(),
+      body: _isLoading
+          ? const Center(child: CircularProgressIndicator())
+          : _buildEditorForm(),
+    );
+  }
 
-                    // Tags section
-                    Row(
-                      children: [
-                        Expanded(
-                          child: TextField(
-                            controller: _tagController,
-                            decoration: const InputDecoration(
-                              hintText: 'Add a tag',
-                              prefixIcon: Icon(Icons.tag),
-                              border: OutlineInputBorder(),
-                            ),
-                            onSubmitted: (_) => _addTag(),
-                          ),
-                        ),
-                        IconButton(
-                          icon: const Icon(Icons.add),
-                          onPressed: _addTag,
-                        ),
-                      ],
-                    ),
-
-                    // Tags list
-                    if (_tags.isNotEmpty)
-                      Container(
-                        height: 50,
-                        margin: const EdgeInsets.symmetric(vertical: 8),
-                        child: ListView.builder(
-                          scrollDirection: Axis.horizontal,
-                          itemCount: _tags.length,
-                          itemBuilder: (context, index) {
-                            return Padding(
-                              padding: const EdgeInsets.only(right: 8),
-                              child: Chip(
-                                label: Text(_tags[index]),
-                                deleteIcon: const Icon(Icons.close, size: 18),
-                                onDeleted: () => _removeTag(_tags[index]),
-                              ),
-                            );
-                          },
+  Widget _buildEditorForm() {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        children: [
+          if (_errorMessage != null)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 16),
+              child: Card(
+                color: Colors.red[100],
+                child: Padding(
+                  padding: const EdgeInsets.all(8),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.error_outline, color: Colors.red),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          _errorMessage!,
+                          style: const TextStyle(color: Colors.red),
                         ),
                       ),
-
-                    const Divider(),
-
-                    // Content input
-                    Expanded(
-                      child: TextField(
-                        controller: _contentController,
-                        maxLines: null,
-                        expands: true,
-                        textAlignVertical: TextAlignVertical.top,
-                        style: const TextStyle(fontSize: 16, height: 1.5),
-                        decoration: const InputDecoration(
-                          hintText: 'Note content...',
-                          border: InputBorder.none,
-                        ),
-                      ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
               ),
+            ),
+          TextField(
+            controller: _titleController,
+            decoration: const InputDecoration(
+              labelText: 'Title',
+              border: OutlineInputBorder(),
+            ),
+            textCapitalization: TextCapitalization.sentences,
+            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            maxLines: 1,
+          ),
+          const SizedBox(height: 16),
+          TextField(
+            controller: _contentController,
+            decoration: const InputDecoration(
+              labelText: 'Content',
+              border: OutlineInputBorder(),
+              alignLabelWithHint: true,
+            ),
+            textCapitalization: TextCapitalization.sentences,
+            maxLines: 20,
+            minLines: 10,
+          ),
+          const SizedBox(height: 16),
+          if (_isSaving)
+            const Center(
+              child: CircularProgressIndicator(),
+            ),
+        ],
+      ),
     );
   }
 }

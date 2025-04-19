@@ -5,60 +5,67 @@ import 'package:go_router/go_router.dart';
 import '../../features/auth/presentation/screens/login_screen.dart';
 import '../../features/notes/presentation/screens/notes_list_screen.dart';
 import '../../features/notes/presentation/screens/note_detail_screen.dart';
-import '../../features/notes/presentation/screens/note_editor_screen.dart';
 import '../auth/providers/auth_provider.dart';
 
 final goRouterProvider = Provider<GoRouter>((ref) {
-  final authState = ref.watch(authStateProvider);
+  final authStateListenable = ValueNotifier<bool>(false);
+
+  // Listen to auth state changes and update the notifier
+  ref.listen<AsyncValue<bool>>(
+    authStateProvider, // Corrected provider name
+    (_, state) => state.whenData(
+      (isAuthenticated) => authStateListenable.value = isAuthenticated,
+    ),
+  );
 
   return GoRouter(
     initialLocation: '/',
-    debugLogDiagnostics: true,
+    refreshListenable: authStateListenable,
     redirect: (context, state) {
-      // If the user is not logged in and not on the login screen, redirect to login
-      final isLoggedIn = authState.when(
-        data: (user) => user != null,
-        loading: () => false,
-        error: (_, __) => false,
-      );
+      final isAuthenticated = authStateListenable.value;
+      final isLoggingIn = state.location == '/login';
 
-      final isLoginRoute = state.fullPath == '/login';
-
-      if (!isLoggedIn && !isLoginRoute) {
+      // If not logged in, redirect to login
+      if (!isAuthenticated && !isLoggingIn) {
         return '/login';
       }
 
-      // If the user is logged in and on the login screen, redirect to home
-      if (isLoggedIn && isLoginRoute) {
+      // If logged in and on login page, redirect to home
+      if (isAuthenticated && isLoggingIn) {
         return '/';
       }
 
+      // No redirect needed
       return null;
     },
     routes: [
-      GoRoute(path: '/', builder: (context, state) => const NotesListScreen()),
-      GoRoute(path: '/login', builder: (context, state) => const LoginScreen()),
       GoRoute(
-        path: '/note/:id',
-        builder: (context, state) {
-          final noteId = state.pathParameters['id']!;
-          return NoteDetailScreen(noteId: noteId);
-        },
+        path: '/',
+        builder: (BuildContext context, GoRouterState state) =>
+            const NotesListScreen(),
       ),
       GoRoute(
-        path: '/note/edit/:id',
-        builder: (context, state) {
-          final noteId = state.pathParameters['id'];
-          return NoteEditorScreen(noteId: noteId); // null for new note
-        },
+        path: '/login',
+        builder: (BuildContext context, GoRouterState state) =>
+            const LoginScreen(),
       ),
       GoRoute(
         path: '/note/new',
-        builder: (context, state) => const NoteEditorScreen(),
+        builder: (BuildContext context, GoRouterState state) =>
+            const NoteDetailScreen(),
+      ),
+      GoRoute(
+        path: '/note/:id',
+        builder: (BuildContext context, GoRouterState state) {
+          final noteId = state.params['id']!;
+          return NoteDetailScreen(noteId: noteId);
+        },
       ),
     ],
-    errorBuilder:
-        (context, state) =>
-            Scaffold(body: Center(child: Text('Error: ${state.error}'))),
+    errorBuilder: (BuildContext context, GoRouterState state) => Scaffold(
+      body: Center(
+        child: Text('Route not found: ${state.location}'),
+      ),
+    ),
   );
 });

@@ -1,5 +1,7 @@
+import 'package:collection/collection.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:dartz/dartz.dart';
+import 'package:http/http.dart' as http; // Add this import
 
 import '../models/note_model.dart';
 import '../services/drive_service.dart';
@@ -8,6 +10,12 @@ import '../../auth/providers/auth_provider.dart';
 // Provider for Drive service
 final driveServiceProvider = Provider<DriveService>((ref) {
   return DriveService();
+});
+
+// Provider for authenticated HTTP client
+final authenticatedClientProvider = FutureProvider<http.Client?>((ref) async {
+  final authService = ref.read(authServiceProvider);
+  return authService.getAuthenticatedClient();
 });
 
 // Provider for notes state
@@ -72,6 +80,17 @@ class NotesNotifier extends AsyncNotifier<List<NoteModel>> {
   }
 
   Future<NoteModel?> getNoteById(String noteId) async {
+    // First check if the note exists in the current state
+    final currentNotes = state.value;
+    if (currentNotes != null) {
+      final cachedNote =
+          currentNotes.firstWhereOrNull((note) => note.id == noteId);
+      if (cachedNote != null) {
+        return cachedNote;
+      }
+    }
+
+    // If not found in the cache, fetch from Drive
     final client = await ref.read(authenticatedClientProvider.future);
     if (client == null) return null;
 
@@ -120,19 +139,18 @@ class NotesNotifier extends AsyncNotifier<List<NoteModel>> {
       noteId,
       title,
       content,
-      tags: tags,
+      tags: tags ?? [], // Ensure non-nullable list
     );
 
     result.fold((error) => null, (updatedNote) {
       // Update the note in the current state
       final currentNotes = state.value ?? [];
-      final updatedNotes =
-          currentNotes.map((note) {
-            if (note.id == noteId) {
-              return updatedNote;
-            }
-            return note;
-          }).toList();
+      final updatedNotes = currentNotes.map((note) {
+        if (note.id == noteId) {
+          return updatedNote;
+        }
+        return note;
+      }).toList();
 
       state = AsyncValue.data(updatedNotes);
     });

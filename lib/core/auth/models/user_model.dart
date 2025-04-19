@@ -1,10 +1,9 @@
-import 'package:equatable/equatable.dart';
 import 'package:json_annotation/json_annotation.dart';
 
 part 'user_model.g.dart';
 
 @JsonSerializable()
-class UserModel extends Equatable {
+class UserModel {
   final String id;
   final String email;
   final String displayName;
@@ -23,5 +22,19 @@ class UserModel extends Equatable {
   Map<String, dynamic> toJson() => _$UserModelToJson(this);
 
   @override
-  List<Object?> get props => [id, email, displayName, photoUrl];
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is UserModel &&
+          runtimeType == other.runtimeType &&
+          id == other.id &&
+          email == other.email &&
+          displayName == other.displayName &&
+          photoUrl == other.photoUrl;
+
+  @override
+  int get hashCode =>
+      id.hashCode ^
+      email.hashCode ^
+      displayName.hashCode ^
+      (photoUrl?.hashCode ?? 0);
 }

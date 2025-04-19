@@ -1,23 +1,25 @@
-import 'package:equatable/equatable.dart';
+import 'package:flutter/foundation.dart';
 import 'package:json_annotation/json_annotation.dart';
 
 part 'note_model.g.dart';
 
+// NOTE: After changing this model (e.g., making `id` nullable, using `lastModified`),
+// you must run the build runner to regenerate the 'note_model.g.dart' file:
+// flutter pub run build_runner build --delete-conflicting-outputs
+
 @JsonSerializable()
-class NoteModel extends Equatable {
-  final String id;
+class NoteModel {
+  final String? id; // Made nullable
   final String title;
-  final String? content;
-  final DateTime createdAt;
-  final DateTime modifiedAt;
+  final String content;
+  final DateTime lastModified;
   final List<String> tags;
 
   const NoteModel({
     required this.id,
     required this.title,
-    this.content,
-    required this.createdAt,
-    required this.modifiedAt,
+    required this.content,
+    required this.lastModified,
     this.tags = const [],
   });
 
@@ -27,21 +29,18 @@ class NoteModel extends Equatable {
   Map<String, dynamic> toJson() => _$NoteModelToJson(this);
 
   NoteModel copyWith({
+    String? id,
     String? title,
     String? content,
-    DateTime? modifiedAt,
+    DateTime? lastModified,
     List<String>? tags,
   }) {
     return NoteModel(
-      id: id,
+      id: id ?? this.id,
       title: title ?? this.title,
       content: content ?? this.content,
-      createdAt: createdAt,
-      modifiedAt: modifiedAt ?? DateTime.now(),
+      lastModified: lastModified ?? this.lastModified,
       tags: tags ?? this.tags,
     );
   }
-
-  @override
-  List<Object?> get props => [id, title, content, createdAt, modifiedAt, tags];
 }

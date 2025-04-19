@@ -3,11 +3,18 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/auth/providers/auth_provider.dart';
 
-class LoginScreen extends ConsumerWidget {
+class LoginScreen extends ConsumerStatefulWidget {
   const LoginScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<LoginScreen> createState() => _LoginScreenState();
+}
+
+class _LoginScreenState extends ConsumerState<LoginScreen> {
+  bool _isLoading = false;
+
+  @override
+  Widget build(BuildContext context) {
     final authState = ref.watch(authStateProvider);
 
     return Scaffold(
@@ -28,8 +35,8 @@ class LoginScreen extends ConsumerWidget {
                 Text(
                   'DriveNotes',
                   style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                    fontWeight: FontWeight.bold,
-                  ),
+                        fontWeight: FontWeight.bold,
+                      ),
                 ),
                 const SizedBox(height: 8),
                 Text(
@@ -43,55 +50,52 @@ class LoginScreen extends ConsumerWidget {
                 // Sign in button
                 authState.maybeWhen(
                   loading: () => const CircularProgressIndicator(),
-                  error:
-                      (error, _) => Text(
-                        'Error: $error',
-                        style: const TextStyle(color: Colors.red),
+                  error: (error, _) => Text(
+                    'Error: $error',
+                    style: const TextStyle(color: Colors.red),
+                  ),
+                  orElse: () => ElevatedButton.icon(
+                    onPressed: () async {
+                      setState(() {
+                        _isLoading = true;
+                      });
+
+                      final success =
+                          await ref.read(authStateProvider.notifier).signIn();
+
+                      if (!success) {
+                        // Show error
+                        if (mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                                content:
+                                    Text('Login failed. Please try again.')),
+                          );
+                        }
+                      }
+
+                      setState(() {
+                        _isLoading = false;
+                      });
+                    },
+                    icon: Image.asset(
+                      'assets/images/google_logo.png',
+                      height: 24,
+                    ),
+                    label: const Text('Sign in with Google'),
+                    style: ElevatedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(
+                        vertical: 12,
+                        horizontal: 24,
                       ),
-                  orElse:
-                      () => ElevatedButton.icon(
-                        onPressed: () => _handleSignIn(context, ref),
-                        icon: Image.asset(
-                          'assets/images/google_logo.png',
-                          height: 24,
-                        ),
-                        label: const Text('Sign in with Google'),
-                        style: ElevatedButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(
-                            vertical: 12,
-                            horizontal: 24,
-                          ),
-                        ),
-                      ),
+                    ),
+                  ),
                 ),
               ],
             ),
           ),
         ),
       ),
-    );
-  }
-
-  Future<void> _handleSignIn(BuildContext context, WidgetRef ref) async {
-    final authNotifier = ref.read(authStateProvider.notifier);
-
-    final result = await authNotifier.signIn();
-
-    // Show error snackbar if sign-in fails
-    result.fold(
-      (error) {
-        if (context.mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Sign in failed: $error'),
-              backgroundColor: Colors.red,
-            ),
-          );
-        }
-      },
-      (_) {
-        // Sign-in successful, will be automatically redirected by router
-      },
     );
   }
 }
